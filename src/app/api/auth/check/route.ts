@@ -9,8 +9,8 @@ export async function GET(request: NextRequest) {
 
     if (!token) {
       return NextResponse.json(
-        { success: false, message: "Not authenticated" },
-        { status: 401 }
+        { success: false, authenticated: false, message: "Not authenticated" },
+        { status: 200 }
       );
     }
 
@@ -23,8 +23,8 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     return NextResponse.json(
-      { success: false, message: "Invalid token" },
-      { status: 401 }
+      { success: false, authenticated: false, message: "Invalid token" },
+      { status: 200 }
     );
   }
 }

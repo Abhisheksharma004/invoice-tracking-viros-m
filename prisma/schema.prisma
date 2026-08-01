@@ -61,18 +61,18 @@ model Invoice {
   expenses                   Float                    @default(0)
   commission                 Float                    @default(0)
   salesCommission            Float                    @default(0)
-  remarks                    String                   @db.Text
+  remarks                    String                   @default("")
   status                     String                   @default("dispatch")
-  shippingRemarks            String                   @db.Text
+  shippingRemarks            String                   @default("")
   date                       DateTime
   commissionPaid             Boolean                  @default(false)
   commissionPaidDate         DateTime?
-  commissionPayRemarks       String                   @db.Text
+  commissionPayRemarks       String                   @default("")
   commissionPaidAmount       Float                    @default(0)
   commissionPayments         CommissionPayment[]
   salesCommissionPaid        Boolean                  @default(false)
   salesCommissionPaidDate    DateTime?
-  salesCommissionPayRemarks   String                   @db.Text
+  salesCommissionPayRemarks   String                   @default("")
   salesCommissionPaidAmount  Float                    @default(0)
   salesCommissionPayments    SalesCommissionPayment[]
   createdAt                  DateTime                 @default(now())
@@ -87,7 +87,7 @@ model CommissionPayment {
   invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   amount    Float
   date      DateTime
-  remarks   String   @db.Text
+  remarks   String   @default("")
 
   @@index([invoiceId])
   @@map("commission_payments")
@@ -99,7 +99,7 @@ model SalesCommissionPayment {
   invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   amount    Float
   date      DateTime
-  remarks   String   @db.Text
+  remarks   String   @default("")
 
   @@index([invoiceId])
   @@map("sales_commission_payments")
@@ -113,7 +113,7 @@ model OfficeExpense {
   date          DateTime @default(now())
   paymentMethod String   @default("Cash")
   paidTo        String   @default("")
-  remarks       String   @db.Text
+  remarks       String   @default("")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

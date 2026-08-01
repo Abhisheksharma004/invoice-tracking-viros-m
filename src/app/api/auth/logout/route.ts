@@ -7,9 +7,11 @@ export async function POST(request: NextRequest) {
   );
 
   // Clear the token cookie
+  const isSecure = request.nextUrl.protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
+
   response.cookies.set("token", "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecure,
     sameSite: "lax",
     maxAge: 0,
     path: "/",
