@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+
+  @@map("users")
+}
+
+model Client {
+  id            String   @id @default(cuid())
+  name          String
+  email         String
+  phone         String
+  company       String
+  address       String   @db.Text
+  totalInvoices Int      @default(0)
+  totalAmount   Float    @default(0)
+  status        String   @default("active")
+  joinedDate    DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("clients")
+}
+
+model Salesman {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String
+  employeeId   String   @unique
+  address      String   @db.Text
+  totalSales   Float    @default(0)
+  totalClients Int      @default(0)
+  status       String   @default("active")
+  joinedDate   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("salesmen")
+}
+
+model Invoice {
+  id                         String                   @id @default(cuid())
+  invoiceNumber              String                   @unique
+  customerName               String
+  salesPerson                String
+  saleItem                   String
+  cost                       Float
+  saleAmount                 Float
+  expenses                   Float                    @default(0)
+  commission                 Float                    @default(0)
+  salesCommission            Float                    @default(0)
+  remarks                    String                   @default("") @db.Text
+  status                     String                   @default("dispatch")
+  shippingRemarks            String                   @default("") @db.Text
+  date                       DateTime
+  commissionPaid             Boolean                  @default(false)
+  commissionPaidDate         DateTime?
+  commissionPayRemarks       String                   @default("") @db.Text
+  commissionPaidAmount       Float                    @default(0)
+  commissionPayments         CommissionPayment[]
+  salesCommissionPaid        Boolean                  @default(false)
+  salesCommissionPaidDate    DateTime?
+  salesCommissionPayRemarks   String                   @default("") @db.Text
+  salesCommissionPaidAmount  Float                    @default(0)
+  salesCommissionPayments    SalesCommissionPayment[]
+  createdAt                  DateTime                 @default(now())
+  updatedAt                  DateTime                 @updatedAt
+
+  @@map("invoices")
+}
+
+model CommissionPayment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount    Float
+  date      DateTime
+  remarks   String   @default("") @db.Text
+
+  @@index([invoiceId])
+  @@map("commission_payments")
+}
+
+model SalesCommissionPayment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount    Float
+  date      DateTime
+  remarks   String   @default("") @db.Text
+
+  @@index([invoiceId])
+  @@map("sales_commission_payments")
+}
+
+model OfficeExpense {
+  id            String   @id @default(cuid())
+  title         String
+  category      String
+  amount        Float
+  date          DateTime @default(now())
+  paymentMethod String   @default("Cash")
+  paidTo        String   @default("")
+  remarks       String   @default("") @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("office_expenses")
+}
