@@ -5965,7 +5965,8 @@ export default function Dashboard() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      const cursorPosition = e.currentTarget.selectionStart;
+                      const target = e.currentTarget;
+                      const cursorPosition = target.selectionStart;
                       const textBeforeCursor = newInvoice.saleItem.substring(0, cursorPosition);
                       const textAfterCursor = newInvoice.saleItem.substring(cursorPosition);
 
@@ -5975,8 +5976,10 @@ export default function Dashboard() {
 
                       // Set cursor position after the bullet point
                       setTimeout(() => {
-                        e.currentTarget.selectionStart = cursorPosition + 3;
-                        e.currentTarget.selectionEnd = cursorPosition + 3;
+                        if (target) {
+                          target.selectionStart = cursorPosition + 3;
+                          target.selectionEnd = cursorPosition + 3;
+                        }
                       }, 0);
                     }
                   }}
@@ -6346,7 +6349,8 @@ export default function Dashboard() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      const cursorPosition = e.currentTarget.selectionStart;
+                      const target = e.currentTarget;
+                      const cursorPosition = target.selectionStart;
                       const textBeforeCursor = newInvoice.saleItem.substring(0, cursorPosition);
                       const textAfterCursor = newInvoice.saleItem.substring(cursorPosition);
 
@@ -6356,8 +6360,10 @@ export default function Dashboard() {
 
                       // Set cursor position after the bullet point
                       setTimeout(() => {
-                        e.currentTarget.selectionStart = cursorPosition + 3;
-                        e.currentTarget.selectionEnd = cursorPosition + 3;
+                        if (target) {
+                          target.selectionStart = cursorPosition + 3;
+                          target.selectionEnd = cursorPosition + 3;
+                        }
                       }, 0);
                     }
                   }}
