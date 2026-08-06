@@ -81,6 +81,7 @@ interface OfficeExpense {
   category: string;
   amount: number;
   date: string;
+  expenseMonth?: string;
   paymentMethod: "Cash" | "Bank Transfer" | "Credit Card" | "UPI" | "Cheque";
   paidTo?: string;
   remarks?: string;
@@ -359,9 +360,16 @@ export default function Dashboard() {
     try {
       const response = await fetch("/api/invoices", { cache: "no-store" });
       const data = await response.json();
-      setInvoices(data);
+      if (Array.isArray(data)) {
+        setInvoices(data);
+      } else if (data && data.success && Array.isArray(data.invoices)) {
+        setInvoices(data.invoices);
+      } else {
+        setInvoices([]);
+      }
     } catch (error) {
       console.error("Error fetching invoices:", error);
+      setInvoices([]);
     }
   };
 
@@ -369,11 +377,14 @@ export default function Dashboard() {
     try {
       const response = await fetch("/api/office-expenses", { cache: "no-store" });
       const data = await response.json();
-      if (data.success) {
+      if (data && data.success && Array.isArray(data.officeExpenses)) {
         setOfficeExpenses(data.officeExpenses);
+      } else {
+        setOfficeExpenses([]);
       }
     } catch (error) {
       console.error("Error fetching office expenses:", error);
+      setOfficeExpenses([]);
     }
   };
 
@@ -393,6 +404,7 @@ export default function Dashboard() {
     category: "Utilities",
     amount: "",
     date: new Date().toISOString().split("T")[0],
+    expenseMonth: new Date().toISOString().split("T")[0].slice(0, 7),
     paymentMethod: "Cash" as "Cash" | "Bank Transfer" | "Credit Card" | "UPI" | "Cheque",
     paidTo: "",
     remarks: "",
@@ -415,6 +427,7 @@ export default function Dashboard() {
           category: "Utilities",
           amount: "",
           date: new Date().toISOString().split("T")[0],
+          expenseMonth: new Date().toISOString().split("T")[0].slice(0, 7),
           paymentMethod: "Cash",
           paidTo: "",
           remarks: "",
@@ -1282,9 +1295,10 @@ export default function Dashboard() {
   const getInvoiceId = (invoice: Invoice) => invoice._id || invoice.id || "";
 
   // Generate available months from invoice data
+  const safeInvoices = Array.isArray(invoices) ? invoices : [];
   const availableMonths = Array.from(new Set(
-    invoices
-      .filter(inv => inv.date) // Only include invoices with valid dates
+    safeInvoices
+      .filter(inv => inv && inv.date) // Only include invoices with valid dates
       .map(inv => {
         const date = new Date(inv.date);
         return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -1293,9 +1307,9 @@ export default function Dashboard() {
 
   // Filter invoices by selected month based on invoice date
   const filteredInvoicesByMonth = selectedMonth === "all"
-    ? invoices
-    : invoices.filter(inv => {
-      if (!inv.date) return false; // Skip invoices without dates
+    ? safeInvoices
+    : safeInvoices.filter(inv => {
+      if (!inv || !inv.date) return false; // Skip invoices without dates
       const date = new Date(inv.date);
       const invoiceMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       return invoiceMonth === selectedMonth;
@@ -2207,75 +2221,94 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Recent Invoices Table */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
-                <div className="px-6 py-4 border-b border-gray-100">
-                  <h2 className="text-xl font-bold text-gray-900">
-                    Recent Invoices
-                  </h2>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Invoice #
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Client
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Amount
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Date
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Shipping Status
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredInvoicesByMonth.map((invoice) => (
-                        <tr key={invoice.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {invoice.invoiceNumber}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {getInvoiceClient(invoice)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                            {formatINR(getInvoiceAmount(invoice))}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                            {formatDate(invoice.date)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span
-                              className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(
-                                invoice.status
-                              )}`}
-                            >
-                              {getShippingStatusLabel(invoice.status)}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            <button className="text-blue-600 hover:text-blue-800 font-medium mr-3">
-                              View
-                            </button>
-                            <button className="text-green-600 hover:text-green-800 font-medium">
-                              Edit
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {/* Recent Invoices Table (This Month) */}
+              {(() => {
+                const currentMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+                const targetMonth = selectedMonth === "all" ? currentMonthStr : selectedMonth;
+                const recentInvoices = safeInvoices.filter(inv => {
+                  if (!inv || !inv.date) return false;
+                  const d = new Date(inv.date);
+                  const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  return m === targetMonth;
+                });
+
+                return (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6">
+                    <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <h2 className="text-xl font-bold text-gray-900">
+                        Recent Invoices {selectedMonth === "all" ? "(This Month)" : ""}
+                      </h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                      {recentInvoices.length === 0 ? (
+                        <div className="p-8 text-center text-gray-500">
+                          <p className="text-sm font-medium">No invoices found for this month.</p>
+                        </div>
+                      ) : (
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Invoice #
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Client
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Amount
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Date
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Shipping Status
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Actions
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {recentInvoices.map((invoice) => (
+                              <tr key={invoice.id} className="hover:bg-gray-50">
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {invoice.invoiceNumber}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                  {getInvoiceClient(invoice)}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                                  {formatINR(getInvoiceAmount(invoice))}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                  {formatDate(invoice.date)}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span
+                                    className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(
+                                      invoice.status
+                                    )}`}
+                                  >
+                                    {getShippingStatusLabel(invoice.status)}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                  <button className="text-blue-600 hover:text-blue-800 font-medium mr-3">
+                                    View
+                                  </button>
+                                  <button className="text-green-600 hover:text-green-800 font-medium">
+                                    Edit
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Quick Actions */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -4154,9 +4187,7 @@ export default function Dashboard() {
             const filteredExpensesByMonth = selectedMonth === "all"
               ? officeExpenses
               : officeExpenses.filter(exp => {
-                if (!exp.date) return false;
-                const d = new Date(exp.date);
-                const expMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                const expMonth = exp.expenseMonth || (exp.date ? `${new Date(exp.date).getFullYear()}-${String(new Date(exp.date).getMonth() + 1).padStart(2, '0')}` : "");
                 return expMonth === selectedMonth;
               });
 
@@ -4207,7 +4238,9 @@ export default function Dashboard() {
                   <button
                     onClick={() => {
                       let defaultDate = new Date().toISOString().split("T")[0];
+                      let defaultMonth = defaultDate.slice(0, 7);
                       if (selectedMonth && selectedMonth !== "all") {
+                        defaultMonth = selectedMonth;
                         if (!defaultDate.startsWith(selectedMonth)) {
                           defaultDate = `${selectedMonth}-01`;
                         }
@@ -4217,6 +4250,7 @@ export default function Dashboard() {
                         category: "Utilities",
                         amount: "",
                         date: defaultDate,
+                        expenseMonth: defaultMonth,
                         paymentMethod: "Cash",
                         paidTo: "",
                         remarks: "",
@@ -4380,7 +4414,7 @@ export default function Dashboard() {
                                     {new Date(exp.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                                   </span>
                                   <span className="text-xs text-blue-600 font-semibold bg-blue-50 px-1.5 py-0.5 rounded w-fit mt-0.5 border border-blue-100">
-                                    {new Date(exp.date).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+                                    {exp.expenseMonth ? new Date(`${exp.expenseMonth}-01`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }) : new Date(exp.date).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
                                   </span>
                                 </div>
                               </td>
@@ -6567,14 +6601,8 @@ export default function Dashboard() {
                   <input
                     type="month"
                     required
-                    value={newOfficeExpense.date ? newOfficeExpense.date.slice(0, 7) : ""}
-                    onChange={(e) => {
-                      const mVal = e.target.value;
-                      if (mVal) {
-                        const currentDay = newOfficeExpense.date && newOfficeExpense.date.length >= 10 ? newOfficeExpense.date.slice(8, 10) : "01";
-                        setNewOfficeExpense({ ...newOfficeExpense, date: `${mVal}-${currentDay}` });
-                      }
-                    }}
+                    value={newOfficeExpense.expenseMonth || (newOfficeExpense.date ? newOfficeExpense.date.slice(0, 7) : "")}
+                    onChange={(e) => setNewOfficeExpense({ ...newOfficeExpense, expenseMonth: e.target.value })}
                     className="w-full px-4 py-2.5 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 bg-blue-50/40 font-medium"
                   />
                 </div>
@@ -6729,14 +6757,8 @@ export default function Dashboard() {
                   <input
                     type="month"
                     required
-                    value={editingOfficeExpense.date ? editingOfficeExpense.date.slice(0, 7) : ""}
-                    onChange={(e) => {
-                      const mVal = e.target.value;
-                      if (mVal) {
-                        const currentDay = editingOfficeExpense.date && editingOfficeExpense.date.length >= 10 ? editingOfficeExpense.date.slice(8, 10) : "01";
-                        setEditingOfficeExpense({ ...editingOfficeExpense, date: `${mVal}-${currentDay}` });
-                      }
-                    }}
+                    value={editingOfficeExpense.expenseMonth || (editingOfficeExpense.date ? editingOfficeExpense.date.slice(0, 7) : "")}
+                    onChange={(e) => setEditingOfficeExpense({ ...editingOfficeExpense, expenseMonth: e.target.value })}
                     className="w-full px-4 py-2.5 border border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900 bg-green-50/40 font-medium"
                   />
                 </div>
@@ -6748,7 +6770,7 @@ export default function Dashboard() {
                   <input
                     type="date"
                     required
-                    value={editingOfficeExpense.date}
+                    value={editingOfficeExpense.date ? editingOfficeExpense.date.split("T")[0] : ""}
                     onChange={(e) => setEditingOfficeExpense({ ...editingOfficeExpense, date: e.target.value })}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                   />

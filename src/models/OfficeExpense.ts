@@ -5,6 +5,7 @@ export interface IOfficeExpense extends Document {
   category: string;
   amount: number;
   date: Date;
+  expenseMonth?: string;
   paymentMethod: "Cash" | "Bank Transfer" | "Credit Card" | "UPI" | "Cheque";
   paidTo?: string;
   remarks?: string;
@@ -32,6 +33,10 @@ const OfficeExpenseSchema: Schema<IOfficeExpense> = new Schema(
     date: {
       type: Date,
       default: Date.now,
+    },
+    expenseMonth: {
+      type: String,
+      default: "",
     },
     paymentMethod: {
       type: String,

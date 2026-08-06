@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { title, category, amount, date, paymentMethod, paidTo, remarks } = body;
+    const { title, category, amount, date, expenseMonth, paymentMethod, paidTo, remarks } = body;
 
     // Validate required fields
     if (!title || !category || amount === undefined || amount === null) {
@@ -57,12 +57,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const expDate = date ? new Date(date) : new Date();
+    const defaultExpMonth = expenseMonth || `${expDate.getFullYear()}-${String(expDate.getMonth() + 1).padStart(2, '0')}`;
+
     const officeExpense = await prisma.officeExpense.create({
       data: {
         title,
         category,
         amount: numericAmount,
-        date: date ? new Date(date) : new Date(),
+        date: expDate,
+        expenseMonth: defaultExpMonth,
         paymentMethod: paymentMethod || "Cash",
         paidTo: paidTo || "",
         remarks: remarks || "",
@@ -90,7 +94,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, title, category, amount, date, paymentMethod, paidTo, remarks } = body;
+    const { id, title, category, amount, date, expenseMonth, paymentMethod, paidTo, remarks } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -112,6 +116,7 @@ export async function PUT(request: NextRequest) {
     if (category !== undefined) updateData.category = category;
     if (amount !== undefined) updateData.amount = Number(amount);
     if (date !== undefined) updateData.date = new Date(date);
+    if (expenseMonth !== undefined) updateData.expenseMonth = expenseMonth;
     if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod;
     if (paidTo !== undefined) updateData.paidTo = paidTo;
     if (remarks !== undefined) updateData.remarks = remarks;
