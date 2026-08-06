@@ -4205,7 +4205,24 @@ export default function Dashboard() {
                     <p className="text-sm text-gray-500 mt-1">Manage and track your operational and office expenditures</p>
                   </div>
                   <button
-                    onClick={() => setShowAddOfficeExpenseModal(true)}
+                    onClick={() => {
+                      let defaultDate = new Date().toISOString().split("T")[0];
+                      if (selectedMonth && selectedMonth !== "all") {
+                        if (!defaultDate.startsWith(selectedMonth)) {
+                          defaultDate = `${selectedMonth}-01`;
+                        }
+                      }
+                      setNewOfficeExpense({
+                        title: "",
+                        category: "Utilities",
+                        amount: "",
+                        date: defaultDate,
+                        paymentMethod: "Cash",
+                        paidTo: "",
+                        remarks: "",
+                      });
+                      setShowAddOfficeExpenseModal(true);
+                    }}
                     className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-lg transition duration-200 flex items-center justify-center space-x-2 shadow-md"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4358,7 +4375,14 @@ export default function Dashboard() {
                               </td>
                               <td className="py-3.5 px-4 font-bold text-red-600">{formatINR(exp.amount)}</td>
                               <td className="py-3.5 px-4 text-gray-600">
-                                {new Date(exp.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-gray-900">
+                                    {new Date(exp.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                                  </span>
+                                  <span className="text-xs text-blue-600 font-semibold bg-blue-50 px-1.5 py-0.5 rounded w-fit mt-0.5 border border-blue-100">
+                                    {new Date(exp.date).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+                                  </span>
+                                </div>
                               </td>
                               <td className="py-3.5 px-4">
                                 <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
@@ -6538,7 +6562,26 @@ export default function Dashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Date <span className="text-red-500">*</span>
+                    Expense Month<span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="month"
+                    required
+                    value={newOfficeExpense.date ? newOfficeExpense.date.slice(0, 7) : ""}
+                    onChange={(e) => {
+                      const mVal = e.target.value;
+                      if (mVal) {
+                        const currentDay = newOfficeExpense.date && newOfficeExpense.date.length >= 10 ? newOfficeExpense.date.slice(8, 10) : "01";
+                        setNewOfficeExpense({ ...newOfficeExpense, date: `${mVal}-${currentDay}` });
+                      }
+                    }}
+                    className="w-full px-4 py-2.5 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 bg-blue-50/40 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Exact Expense Date <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="date"
@@ -6548,7 +6591,9 @@ export default function Dashboard() {
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">
                     Payment Method
@@ -6563,19 +6608,19 @@ export default function Dashboard() {
                     ))}
                   </select>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Paid To / Vendor
-                </label>
-                <input
-                  type="text"
-                  value={newOfficeExpense.paidTo}
-                  onChange={(e) => setNewOfficeExpense({ ...newOfficeExpense, paidTo: e.target.value })}
-                  placeholder="e.g. Electricity Board, Stationery Shop"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                />
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Paid To / Vendor
+                  </label>
+                  <input
+                    type="text"
+                    value={newOfficeExpense.paidTo}
+                    onChange={(e) => setNewOfficeExpense({ ...newOfficeExpense, paidTo: e.target.value })}
+                    placeholder="e.g. Electricity Board, Stationery Shop"
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
               </div>
 
               <div>
@@ -6679,7 +6724,26 @@ export default function Dashboard() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Date <span className="text-red-500">*</span>
+                    Expense Month (किस महीने का खर्चा) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="month"
+                    required
+                    value={editingOfficeExpense.date ? editingOfficeExpense.date.slice(0, 7) : ""}
+                    onChange={(e) => {
+                      const mVal = e.target.value;
+                      if (mVal) {
+                        const currentDay = editingOfficeExpense.date && editingOfficeExpense.date.length >= 10 ? editingOfficeExpense.date.slice(8, 10) : "01";
+                        setEditingOfficeExpense({ ...editingOfficeExpense, date: `${mVal}-${currentDay}` });
+                      }
+                    }}
+                    className="w-full px-4 py-2.5 border border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900 bg-green-50/40 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Exact Expense Date <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="date"
@@ -6689,7 +6753,9 @@ export default function Dashboard() {
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">
                     Payment Method
@@ -6704,18 +6770,18 @@ export default function Dashboard() {
                     ))}
                   </select>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Paid To / Vendor
-                </label>
-                <input
-                  type="text"
-                  value={editingOfficeExpense.paidTo || ""}
-                  onChange={(e) => setEditingOfficeExpense({ ...editingOfficeExpense, paidTo: e.target.value })}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
-                />
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Paid To / Vendor
+                  </label>
+                  <input
+                    type="text"
+                    value={editingOfficeExpense.paidTo || ""}
+                    onChange={(e) => setEditingOfficeExpense({ ...editingOfficeExpense, paidTo: e.target.value })}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
               </div>
 
               <div>
