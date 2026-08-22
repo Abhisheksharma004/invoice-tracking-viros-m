@@ -126,6 +126,11 @@ interface User {
       view: boolean;
       export: boolean;
     };
+    payments?: {
+      view: boolean;
+      pay: boolean;
+      export: boolean;
+    };
     settings: {
       view: boolean;
       edit: boolean;
@@ -176,6 +181,7 @@ const ROLE_PERMISSIONS = {
   admin: {
     dashboard: { view: true, export: true },
     invoices: { view: true, create: true, edit: true, delete: true, export: true },
+    payments: { view: true, pay: true, export: true },
     customers: { view: true, create: true, edit: true, delete: true, import: true, export: true },
     salesPerson: { view: true, create: true, edit: true, delete: true },
     reports: { view: true, export: true },
@@ -184,6 +190,7 @@ const ROLE_PERMISSIONS = {
   manager: {
     dashboard: { view: true, export: true },
     invoices: { view: true, create: true, edit: true, delete: false, export: true },
+    payments: { view: true, pay: true, export: true },
     customers: { view: true, create: true, edit: true, delete: false, import: true, export: true },
     salesPerson: { view: true, create: true, edit: true, delete: false },
     reports: { view: true, export: true },
@@ -192,6 +199,7 @@ const ROLE_PERMISSIONS = {
   user: {
     dashboard: { view: true, export: false },
     invoices: { view: true, create: true, edit: true, delete: false, export: false },
+    payments: { view: true, pay: true, export: false },
     customers: { view: true, create: true, edit: false, delete: false, import: false, export: false },
     salesPerson: { view: true, create: false, edit: false, delete: false },
     reports: { view: true, export: false },
@@ -200,6 +208,7 @@ const ROLE_PERMISSIONS = {
   viewer: {
     dashboard: { view: true, export: false },
     invoices: { view: true, create: false, edit: false, delete: false, export: false },
+    payments: { view: true, pay: false, export: false },
     customers: { view: true, create: false, edit: false, delete: false, import: false, export: false },
     salesPerson: { view: true, create: false, edit: false, delete: false },
     reports: { view: true, export: false },
@@ -284,7 +293,8 @@ export default function Dashboard() {
   // Helper function to check permissions
   const hasPermission = (section: keyof User['permissions'], action: string): boolean => {
     if (!currentUser?.permissions) return false;
-    return currentUser.permissions[section][action as keyof typeof currentUser.permissions[typeof section]] || false;
+    const sec = currentUser.permissions[section] as any;
+    return sec ? (sec[action] || false) : false;
   };
 
   // Check authentication status on mount
@@ -587,6 +597,30 @@ export default function Dashboard() {
   const [filteredFilterClients, setFilteredFilterClients] = useState<Client[]>([]);
   const [showFilterSalesPersonSuggestions, setShowFilterSalesPersonSuggestions] = useState(false);
   const [filteredFilterSalesmen, setFilteredFilterSalesmen] = useState<Salesman[]>([]);
+
+  // Payment Tab State
+  const [selectedCompanyForPayment, setSelectedCompanyForPayment] = useState<string>("");
+  const [companyPaymentSearch, setCompanyPaymentSearch] = useState("");
+  const [companyPaymentStatusFilter, setCompanyPaymentStatusFilter] = useState<"all" | "pending" | "partial" | "paid">("all");
+  const [companyPaymentSubTab, setCompanyPaymentSubTab] = useState<"invoices" | "history">("invoices");
+  const [showCompanyBulkPayModal, setShowCompanyBulkPayModal] = useState(false);
+  const [companyBulkPayData, setCompanyBulkPayData] = useState<{
+    companyName: string;
+    totalPending: number;
+    payAmount: number;
+    paymentMethod: "Cash" | "Bank Transfer" | "Credit Card" | "UPI" | "Cheque";
+    remarks: string;
+  } | null>(null);
+  const [showPaymentReceiptModal, setShowPaymentReceiptModal] = useState(false);
+  const [receiptData, setReceiptData] = useState<{
+    companyName: string;
+    invoiceNumber: string;
+    amount: number;
+    date: string;
+    remarks: string;
+    salesPerson?: string;
+    paymentType?: string;
+  } | null>(null);
 
   // Password change handler
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -1158,11 +1192,11 @@ export default function Dashboard() {
     invoice: Invoice,
     type: "commission" | "salesCommission"
   ) => {
-    const totalAmount = type === "commission" ? invoice.commission : invoice.salesCommission;
-    const alreadyPaid = type === "commission"
+    const totalAmount = round2(type === "commission" ? invoice.commission : invoice.salesCommission);
+    const alreadyPaid = round2(type === "commission"
       ? (invoice.commissionPaidAmount || 0)
-      : (invoice.salesCommissionPaidAmount || 0);
-    const remaining = totalAmount - alreadyPaid;
+      : (invoice.salesCommissionPaidAmount || 0));
+    const remaining = round2(Math.max(0, totalAmount - alreadyPaid));
     setPayCommissionData({
       invoiceId: getInvoiceId(invoice),
       type,
@@ -1179,11 +1213,14 @@ export default function Dashboard() {
   const handlePayCommission = async () => {
     if (!payCommissionData) return;
     const { payAmount, totalAmount, alreadyPaid } = payCommissionData;
-    if (!payAmount || payAmount <= 0) {
+    const cleanPayAmount = round2(payAmount);
+    const cleanRemaining = round2(Math.max(0, totalAmount - alreadyPaid));
+
+    if (!cleanPayAmount || cleanPayAmount <= 0) {
       toast.error("Please enter a valid amount to pay.");
       return;
     }
-    if (payAmount > totalAmount - alreadyPaid) {
+    if (cleanPayAmount > cleanRemaining + 0.01) {
       toast.error("Amount cannot exceed the remaining balance.");
       return;
     }
@@ -1192,8 +1229,8 @@ export default function Dashboard() {
       const { invoiceId, type, remarks } = payCommissionData;
       const body =
         type === "commission"
-          ? { commissionPayAmount: payAmount, commissionPayRemarks: remarks }
-          : { salesCommissionPayAmount: payAmount, salesCommissionPayRemarks: remarks };
+          ? { commissionPayAmount: cleanPayAmount, commissionPayRemarks: remarks }
+          : { salesCommissionPayAmount: cleanPayAmount, salesCommissionPayRemarks: remarks };
 
       const response = await fetch(`/api/invoices/${invoiceId}`, {
         method: "PATCH",
@@ -1289,6 +1326,238 @@ export default function Dashboard() {
     }
   };
 
+  // Company-Wise Payment Lump-Sum Handler
+  const handlePayCompanyLumpSum = async () => {
+    if (!companyBulkPayData) return;
+    const { companyName, totalPending, payAmount, remarks } = companyBulkPayData;
+    const cleanPayAmount = round2(payAmount);
+    const cleanTotalPending = round2(totalPending);
+
+    if (!cleanPayAmount || cleanPayAmount <= 0) {
+      toast.error("Please enter a valid amount to pay.");
+      return;
+    }
+    if (cleanPayAmount > cleanTotalPending + 0.01) {
+      toast.error("Amount cannot exceed the total pending balance.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Find all invoices for this company with pending balance,
+      // sorted chronologically (oldest date first) so partial payments
+      // are applied starting from the oldest unpaid month onwards (FIFO)
+      const companyInvoices = invoices
+        .filter(inv => {
+          const invCompany = getInvoiceClient(inv);
+          if (invCompany.toLowerCase() !== companyName.toLowerCase()) return false;
+          const comm = round2(inv.commission || 0);
+          const paid = round2(inv.commissionPaidAmount || 0);
+          return round2(comm - paid) > 0;
+        })
+        .sort((a, b) => {
+          const dateA = a.date ? new Date(a.date).getTime() : 0;
+          const dateB = b.date ? new Date(b.date).getTime() : 0;
+          if (dateA !== dateB) return dateA - dateB;
+          return (a.createdAt ? new Date(a.createdAt).getTime() : 0) - (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        });
+
+      if (companyInvoices.length === 0) {
+        toast.error("No pending invoices found for this company.");
+        setShowCompanyBulkPayModal(false);
+        return;
+      }
+
+      let remainingToDistribute = cleanPayAmount;
+      const paymentPromises: Promise<any>[] = [];
+
+      for (const inv of companyInvoices) {
+        if (remainingToDistribute <= 0.001) break;
+        const comm = round2(inv.commission || 0);
+        const paid = round2(inv.commissionPaidAmount || 0);
+        const pendingOnThisInv = round2(comm - paid);
+        const amountToPayThisInv = round2(Math.min(remainingToDistribute, pendingOnThisInv));
+
+        if (amountToPayThisInv > 0) {
+          remainingToDistribute = round2(remainingToDistribute - amountToPayThisInv);
+          paymentPromises.push(
+            fetch(`/api/invoices/${getInvoiceId(inv)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                commissionPayAmount: amountToPayThisInv,
+                commissionPayRemarks: remarks ? `${remarks} (Company Payment)` : "Company Payment",
+              }),
+            })
+          );
+        }
+      }
+
+      await Promise.all(paymentPromises);
+      await fetchInvoices();
+      toast.success(`${formatINR(cleanPayAmount)} payment recorded for ${companyName}!`);
+      setShowCompanyBulkPayModal(false);
+      setCompanyBulkPayData(null);
+    } catch (error) {
+      console.error("Error processing company payment:", error);
+      toast.error("Failed to process payment. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Export Company PDF Statement
+  const handleExportCompanyPDF = (compName: string, compInvoices: Invoice[], compStats: any) => {
+    try {
+      const doc = new jsPDF();
+
+      // Title Banner
+      doc.setFillColor(30, 58, 138);
+      doc.rect(0, 0, 210, 24, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text("COMPANY PAYMENT STATEMENT", 14, 16);
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 150, 16);
+
+      // Company Info
+      doc.setTextColor(30, 41, 59);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Company / Client: ${compName}`, 14, 34);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Period: ${selectedMonth === "all" ? "All Time" : selectedMonth}`, 14, 40);
+
+      // Summary Table
+      autoTable(doc, {
+        startY: 45,
+        head: [["Total Invoices", "Total Sales", "Total Commission", "Total Paid", "Pending Balance"]],
+        body: [[
+          `${compStats.totalInvoices}`,
+          `Rs. ${compStats.totalSales.toLocaleString("en-IN")}`,
+          `Rs. ${compStats.totalCommission.toLocaleString("en-IN")}`,
+          `Rs. ${compStats.totalPaid.toLocaleString("en-IN")}`,
+          `Rs. ${compStats.pendingBalance.toLocaleString("en-IN")}`,
+        ]],
+        theme: "striped",
+        headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontStyle: "bold" },
+        styles: { fontSize: 9 },
+      });
+
+      const afterSummaryY = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY + 8 : 70;
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.text("Invoices & Commission Details", 14, afterSummaryY);
+
+      // Invoices Table
+      const invoiceRows = compInvoices.map((inv) => {
+        const amount = getInvoiceAmount(inv);
+        const comm = inv.commission || 0;
+        const paid = inv.commissionPaidAmount || 0;
+        const bal = comm - paid;
+        const status = bal <= 0 ? "Fully Paid" : paid > 0 ? "Partially Paid" : "Unpaid";
+        return [
+          inv.invoiceNumber,
+          inv.date ? new Date(inv.date).toLocaleDateString('en-IN') : "-",
+          inv.salesPerson || "-",
+          inv.saleItem || "-",
+          `Rs. ${amount.toLocaleString("en-IN")}`,
+          `Rs. ${comm.toLocaleString("en-IN")}`,
+          `Rs. ${paid.toLocaleString("en-IN")}`,
+          `Rs. ${bal.toLocaleString("en-IN")}`,
+          status,
+        ];
+      });
+
+      autoTable(doc, {
+        startY: afterSummaryY + 4,
+        head: [["Invoice #", "Date", "Sales Person", "Item", "Sale (Rs)", "Comm (Rs)", "Paid (Rs)", "Balance (Rs)", "Status"]],
+        body: invoiceRows,
+        theme: "grid",
+        headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: "bold" },
+        styles: { fontSize: 8 },
+      });
+
+      doc.save(`${compName.replace(/[^a-zA-Z0-9]/g, "_")}_Payment_Statement.pdf`);
+      toast.success("Statement downloaded as PDF!");
+    } catch (err) {
+      console.error("PDF Export Error:", err);
+      toast.error("Failed to generate PDF");
+    }
+  };
+
+  // Export Company Excel
+  const handleExportCompanyExcel = (compName: string, compInvoices: Invoice[], compStats: any) => {
+    try {
+      const wb = XLSX.utils.book_new();
+
+      const invData = compInvoices.map(inv => {
+        const amount = getInvoiceAmount(inv);
+        const comm = inv.commission || 0;
+        const paid = inv.commissionPaidAmount || 0;
+        return {
+          "Invoice Number": inv.invoiceNumber,
+          "Date": inv.date ? new Date(inv.date).toLocaleDateString('en-IN') : "",
+          "Sales Person": inv.salesPerson,
+          "Sale Item": inv.saleItem,
+          "Sale Amount (₹)": amount,
+          "Commission (₹)": comm,
+          "Paid Amount (₹)": paid,
+          "Balance Pending (₹)": comm - paid,
+          "Status": (comm - paid) <= 0 ? "Fully Paid" : paid > 0 ? "Partially Paid" : "Unpaid",
+          "Remarks": inv.remarks || "",
+        };
+      });
+      const wsInv = XLSX.utils.json_to_sheet(invData);
+      XLSX.utils.book_append_sheet(wb, wsInv, "Invoices");
+
+      const historyData: any[] = [];
+      compInvoices.forEach(inv => {
+        if (inv.commissionPayments && inv.commissionPayments.length > 0) {
+          inv.commissionPayments.forEach(p => {
+            historyData.push({
+              "Invoice Number": inv.invoiceNumber,
+              "Payment Date": p.date ? new Date(p.date).toLocaleDateString('en-IN') : "",
+              "Amount Paid (₹)": p.amount,
+              "Remarks / Reference": p.remarks || "",
+            });
+          });
+        }
+      });
+      if (historyData.length > 0) {
+        const wsHistory = XLSX.utils.json_to_sheet(historyData);
+        XLSX.utils.book_append_sheet(wb, wsHistory, "Payment History");
+      }
+
+      const summaryAoa = [
+        ["Company Payment Statement"],
+        ["Company Name", compName],
+        ["Period", selectedMonth === "all" ? "All Time" : selectedMonth],
+        ["Generated On", new Date().toLocaleDateString('en-IN')],
+        [""],
+        ["Financial Summary"],
+        ["Total Invoices", compStats.totalInvoices],
+        ["Total Sales (₹)", compStats.totalSales],
+        ["Total Commission Payable (₹)", compStats.totalCommission],
+        ["Total Commission Paid (₹)", compStats.totalPaid],
+        ["Total Balance Pending (₹)", compStats.pendingBalance],
+      ];
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryAoa);
+      XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+
+      XLSX.writeFile(wb, `${compName.replace(/[^a-zA-Z0-9]/g, "_")}_Payments.xlsx`);
+      toast.success("Excel exported successfully!");
+    } catch (err) {
+      console.error("Excel Export Error:", err);
+      toast.error("Failed to export Excel");
+    }
+  };
+
   // Helper functions to handle both old and new field names
   const getInvoiceClient = (invoice: Invoice) => invoice.customerName || invoice.client || "";
   const getInvoiceAmount = (invoice: Invoice) => invoice.saleAmount || invoice.amount || 0;
@@ -1330,12 +1599,20 @@ export default function Dashboard() {
     }
   };
 
+  const round2 = (num: number): number => {
+    if (typeof num !== "number" || isNaN(num)) return 0;
+    return Math.round((num + Number.EPSILON) * 100) / 100;
+  };
+
   const formatINR = (amount: number) => {
+    const val = round2(amount || 0);
+    const hasDecimals = !Number.isInteger(val);
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      maximumFractionDigits: 0,
-    }).format(amount);
+      minimumFractionDigits: hasDecimals ? 2 : 0,
+      maximumFractionDigits: 2,
+    }).format(val);
   };
 
   const formatDate = (dateString: string) => {
@@ -1422,6 +1699,15 @@ export default function Dashboard() {
       icon: (
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      ),
+    },
+    {
+      id: "payments",
+      name: "Payments",
+      icon: (
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
         </svg>
       ),
     },
@@ -1789,7 +2075,7 @@ export default function Dashboard() {
           <div className="px-6 py-4 flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                {activeTab === "clients" ? "Customers" : activeTab === "salesman" ? "Sales Person" : activeTab === "office-expenses" ? "Office Expenses" : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+                {activeTab === "clients" ? "Customers" : activeTab === "salesman" ? "Sales Person" : activeTab === "office-expenses" ? "Office Expenses" : activeTab === "payments" ? "Company Payments" : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
               </h1>
               <p className="text-sm text-gray-600 mt-1">
                 Welcome back! Here's what's happening today.
@@ -1797,8 +2083,8 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center space-x-4">
 
-              {/* Month Filter - Show on dashboard, invoices, clients, salesman, office-expenses, and reports tabs */}
-              {(activeTab === "dashboard" || activeTab === "invoices" || activeTab === "clients" || activeTab === "salesman" || activeTab === "office-expenses" || activeTab === "reports") && (
+              {/* Month Filter - Show on dashboard, invoices, payments, clients, salesman, office-expenses, and reports tabs */}
+              {(activeTab === "dashboard" || activeTab === "invoices" || activeTab === "payments" || activeTab === "clients" || activeTab === "salesman" || activeTab === "office-expenses" || activeTab === "reports") && (
                 <div className="relative">
                   <select
                     value={selectedMonth}
@@ -3112,6 +3398,592 @@ export default function Dashboard() {
               </div>
             </>
           )}
+
+          {/* Company-Wise Payments Tab Content */}
+          {activeTab === "payments" && (() => {
+            // Collect all unique companies from clients & invoices
+            const clientCompanyNames = clients.map(c => (c.company || c.name || "").trim()).filter(Boolean);
+            const invoiceCompanyNames = invoices.map(inv => getInvoiceClient(inv).trim()).filter(Boolean);
+            const uniqueCompanyNames = Array.from(new Set([...clientCompanyNames, ...invoiceCompanyNames])).sort((a, b) => a.localeCompare(b));
+
+            // Compute statistics for each company
+            const companyList = uniqueCompanyNames.map(compName => {
+              const compInvoices = invoices
+                .filter(inv => {
+                  const invComp = getInvoiceClient(inv).trim().toLowerCase();
+                  if (invComp !== compName.toLowerCase()) return false;
+                  if (selectedMonth === "all") return true;
+                  if (!inv.date) return false;
+                  const d = new Date(inv.date);
+                  const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  return m === selectedMonth;
+                })
+                .sort((a, b) => {
+                  const dateA = a.date ? new Date(a.date).getTime() : 0;
+                  const dateB = b.date ? new Date(b.date).getTime() : 0;
+                  if (dateA !== dateB) return dateA - dateB;
+                  return (a.createdAt ? new Date(a.createdAt).getTime() : 0) - (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+                });
+
+              const matchedClient = clients.find(c => (c.company || c.name || "").trim().toLowerCase() === compName.toLowerCase());
+              const totalInvoices = compInvoices.length;
+              const totalSales = round2(compInvoices.reduce((s, inv) => s + getInvoiceAmount(inv), 0));
+              const totalCommission = round2(compInvoices.reduce((s, inv) => s + (inv.commission || 0), 0));
+              const totalPaid = round2(compInvoices.reduce((s, inv) => s + (inv.commissionPaidAmount || 0), 0));
+              const pendingBalance = round2(Math.max(0, totalCommission - totalPaid));
+              const isPaid = pendingBalance <= 0 && totalCommission > 0;
+              const isPartial = totalPaid > 0 && pendingBalance > 0;
+              const isPending = totalPaid === 0 && totalCommission > 0;
+              const status = isPaid ? "paid" : isPartial ? "partial" : isPending ? "pending" : "no_comm";
+
+              // Gather payment history for this company
+              const paymentHistory: Array<{
+                invoiceId: string;
+                invoiceNumber: string;
+                salesPerson?: string;
+                amount: number;
+                date: string;
+                remarks: string;
+              }> = [];
+
+              compInvoices.forEach(inv => {
+                if (inv.commissionPayments && inv.commissionPayments.length > 0) {
+                  inv.commissionPayments.forEach(p => {
+                    paymentHistory.push({
+                      invoiceId: getInvoiceId(inv),
+                      invoiceNumber: inv.invoiceNumber,
+                      salesPerson: inv.salesPerson,
+                      amount: round2(p.amount),
+                      date: p.date,
+                      remarks: p.remarks || "Commission Payment",
+                    });
+                  });
+                }
+              });
+
+              // Sort history newest first
+              paymentHistory.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+              return {
+                companyName: compName,
+                client: matchedClient,
+                invoices: compInvoices,
+                totalInvoices,
+                totalSales,
+                totalCommission,
+                totalPaid,
+                pendingBalance,
+                status,
+                paymentHistory,
+              };
+            });
+
+            // Overall Summary KPI Stats for Payments Tab
+            const totalCompaniesCount = companyList.length;
+            const totalInvoicesInPeriod = companyList.reduce((s, c) => s + c.totalInvoices, 0);
+            const totalSalesInPeriod = round2(companyList.reduce((s, c) => s + c.totalSales, 0));
+            const totalCommissionInPeriod = round2(companyList.reduce((s, c) => s + c.totalCommission, 0));
+            const totalPaidInPeriod = round2(companyList.reduce((s, c) => s + c.totalPaid, 0));
+            const totalPendingInPeriod = round2(companyList.reduce((s, c) => s + c.pendingBalance, 0));
+
+            // Filter companies by search query and status filter
+            const filteredCompanies = companyList.filter(item => {
+              const matchesSearch = companyPaymentSearch === "" ||
+                item.companyName.toLowerCase().includes(companyPaymentSearch.toLowerCase()) ||
+                (item.client?.phone && item.client.phone.includes(companyPaymentSearch)) ||
+                (item.client?.email && item.client.email.toLowerCase().includes(companyPaymentSearch.toLowerCase()));
+
+              const matchesStatus = companyPaymentStatusFilter === "all" ||
+                (companyPaymentStatusFilter === "pending" && (item.status === "pending" || item.status === "partial")) ||
+                (companyPaymentStatusFilter === "partial" && item.status === "partial") ||
+                (companyPaymentStatusFilter === "paid" && item.status === "paid");
+
+              return matchesSearch && matchesStatus;
+            });
+
+            // Resolve active selected company
+            const effectiveSelectedName = selectedCompanyForPayment && filteredCompanies.some(c => c.companyName === selectedCompanyForPayment)
+              ? selectedCompanyForPayment
+              : filteredCompanies[0]?.companyName || "";
+
+            const activeCompanyData = companyList.find(c => c.companyName === effectiveSelectedName) || filteredCompanies[0];
+
+            return (
+              <>
+                {/* Top Summary KPI Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 mb-6">
+                  {/* Total Companies */}
+                  <div className="bg-white rounded-xl shadow-xs p-3.5 sm:p-4 border border-gray-200/80 hover:shadow-md transition">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 truncate">Total Companies</p>
+                        <p className="text-base sm:text-lg font-bold text-gray-900 mt-0.5 leading-snug">
+                          {totalCompaniesCount}
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-0.5 truncate">{totalInvoicesInPeriod} total invoices</p>
+                      </div>
+                      <div className="bg-blue-50 text-blue-600 rounded-lg p-2 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Total Sales Value */}
+                  <div className="bg-white rounded-xl shadow-xs p-3.5 sm:p-4 border border-gray-200/80 hover:shadow-md transition">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 truncate">Total Sales Value</p>
+                        <p className="text-base sm:text-lg font-bold text-blue-700 mt-0.5 leading-snug truncate" title={formatINR(totalSalesInPeriod)}>
+                          {formatINR(totalSalesInPeriod)}
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-0.5 truncate">{selectedMonth === "all" ? "All Time" : selectedMonth}</p>
+                      </div>
+                      <div className="bg-indigo-50 text-indigo-600 rounded-lg p-2 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Total Commission */}
+                  <div className="bg-white rounded-xl shadow-xs p-3.5 sm:p-4 border border-gray-200/80 hover:shadow-md transition">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 truncate">Total Commission</p>
+                        <p className="text-base sm:text-lg font-bold text-purple-700 mt-0.5 leading-snug truncate" title={formatINR(totalCommissionInPeriod)}>
+                          {formatINR(totalCommissionInPeriod)}
+                        </p>
+                        <p className="text-[11px] text-gray-500 mt-0.5 truncate">Company commission</p>
+                      </div>
+                      <div className="bg-purple-50 text-purple-600 rounded-lg p-2 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l4-2 4 2 4-2 4 2z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Total Paid */}
+                  <div className="bg-white rounded-xl shadow-xs p-3.5 sm:p-4 border border-green-200/80 hover:shadow-md transition">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-green-700 truncate">Total Paid</p>
+                        <p className="text-base sm:text-lg font-bold text-green-600 mt-0.5 leading-snug truncate" title={formatINR(totalPaidInPeriod)}>
+                          {formatINR(totalPaidInPeriod)}
+                        </p>
+                        <p className="text-[11px] text-green-600 mt-0.5 font-medium truncate">
+                          {totalCommissionInPeriod > 0 ? Math.round((totalPaidInPeriod / totalCommissionInPeriod) * 100) : 100}% settled
+                        </p>
+                      </div>
+                      <div className="bg-green-50 text-green-600 rounded-lg p-2 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pending Balance */}
+                  <div className="bg-white rounded-xl shadow-xs p-3.5 sm:p-4 border border-red-200/80 hover:shadow-md transition">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-red-700 truncate">Pending Balance</p>
+                        <p className="text-base sm:text-lg font-bold text-red-600 mt-0.5 leading-snug truncate" title={formatINR(totalPendingInPeriod)}>
+                          {formatINR(totalPendingInPeriod)}
+                        </p>
+                        <p className="text-[11px] text-red-600 mt-0.5 font-medium truncate">To be paid</p>
+                      </div>
+                      <div className="bg-red-50 text-red-600 rounded-lg p-2 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Single Column Workplace */}
+                <div className="space-y-5">
+                  {/* Top Section: Company Search, Filter & Quick Selector Control Bar */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 sm:p-5">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
+                        {/* Search Bar */}
+                        <div className="relative flex-1 max-w-md">
+                          <input
+                            type="text"
+                            placeholder="Search company or phone..."
+                            value={companyPaymentSearch}
+                            onChange={(e) => setCompanyPaymentSearch(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+                          />
+                          <svg className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                        </div>
+
+                        {/* Status Filter Pills */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {[
+                            { id: "all", label: "All" },
+                            { id: "pending", label: "Pending" },
+                            { id: "partial", label: "Partial" },
+                            { id: "paid", label: "Paid" },
+                          ].map((filter) => (
+                            <button
+                              key={filter.id}
+                              onClick={() => setCompanyPaymentStatusFilter(filter.id as any)}
+                              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition ${
+                                companyPaymentStatusFilter === filter.id
+                                  ? "bg-blue-600 text-white shadow-xs"
+                                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                              }`}
+                            >
+                              {filter.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Quick Dropdown Selector */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider hidden sm:inline">Active Company:</span>
+                        <select
+                          value={effectiveSelectedName}
+                          onChange={(e) => setSelectedCompanyForPayment(e.target.value)}
+                          className="px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs sm:text-sm font-bold text-gray-900 focus:ring-2 focus:ring-blue-500 focus:bg-white max-w-xs truncate"
+                        >
+                          {filteredCompanies.map((c) => (
+                            <option key={c.companyName} value={c.companyName}>
+                              {c.companyName} {c.pendingBalance > 0 ? `(₹${c.pendingBalance.toLocaleString("en-IN")} Due)` : "✓"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Horizontal Scrollable Company Cards Strip */}
+                    <div className="mt-3 flex gap-2.5 overflow-x-auto pb-1.5">
+                      {filteredCompanies.length === 0 ? (
+                        <p className="text-xs text-gray-500 py-2">No companies match the current filter.</p>
+                      ) : (
+                        filteredCompanies.map((c) => {
+                          const isSelected = effectiveSelectedName === c.companyName;
+                          return (
+                            <button
+                              key={c.companyName}
+                              onClick={() => setSelectedCompanyForPayment(c.companyName)}
+                              className={`shrink-0 px-3.5 py-2.5 rounded-xl text-left border transition-all flex items-center gap-3 ${
+                                isSelected
+                                  ? "bg-blue-50/90 border-blue-500 ring-2 ring-blue-500/20 shadow-xs"
+                                  : "bg-white border-gray-200 hover:border-blue-300 hover:bg-gray-50"
+                              }`}
+                            >
+                              <div className="min-w-0 max-w-[220px]">
+                                <p className="text-xs font-bold text-gray-900 truncate">{c.companyName}</p>
+                                <p className="text-[11px] text-gray-500 mt-0.5">{c.totalInvoices} inv • Comm: {formatINR(c.totalCommission)}</p>
+                              </div>
+                              {c.pendingBalance > 0 ? (
+                                <span className="shrink-0 px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-black rounded-full whitespace-nowrap">
+                                  {formatINR(c.pendingBalance)} Due
+                                </span>
+                              ) : c.totalCommission > 0 ? (
+                                <span className="shrink-0 px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-black rounded-full whitespace-nowrap">
+                                  ✓ Paid
+                                </span>
+                              ) : (
+                                <span className="shrink-0 px-2 py-0.5 bg-gray-100 text-gray-600 text-[10px] font-semibold rounded-full whitespace-nowrap">
+                                  No Comm
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Selected Company Payment Dossier & Operations (Full Width) */}
+                  <div className="w-full space-y-4">
+                    {activeCompanyData ? (
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                        {/* Company Hero Header */}
+                        <div className="bg-linear-to-r from-blue-900 via-blue-800 to-indigo-900 text-white p-5 sm:p-6">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center space-x-3">
+                                <div className="w-12 h-12 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center text-white border border-white/20 shrink-0">
+                                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                  </svg>
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className="text-xl sm:text-2xl font-extrabold tracking-tight truncate">{activeCompanyData.companyName}</h3>
+                                  <p className="text-xs text-blue-200 mt-0.5 truncate">
+                                    {activeCompanyData.client?.email ? `${activeCompanyData.client.email} • ` : ""}
+                                    {activeCompanyData.client?.phone ? `${activeCompanyData.client.phone} • ` : ""}
+                                    {activeCompanyData.client?.address || "Registered Client Company"}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+                              {activeCompanyData.pendingBalance > 0 && (
+                                <button
+                                  onClick={() => {
+                                    const cleanPending = round2(activeCompanyData.pendingBalance);
+                                    setCompanyBulkPayData({
+                                      companyName: activeCompanyData.companyName,
+                                      totalPending: cleanPending,
+                                      payAmount: cleanPending,
+                                      paymentMethod: "Bank Transfer",
+                                      remarks: "",
+                                    });
+                                    setShowCompanyBulkPayModal(true);
+                                  }}
+                                  className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition flex items-center space-x-2 text-sm whitespace-nowrap"
+                                >
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                                  </svg>
+                                  <span>Pay Company Balance ({formatINR(activeCompanyData.pendingBalance)})</span>
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => handleExportCompanyPDF(activeCompanyData.companyName, activeCompanyData.invoices, activeCompanyData)}
+                                className="px-3.5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition flex items-center space-x-1.5 text-xs whitespace-nowrap"
+                                title="Download PDF Statement"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span>PDF</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleExportCompanyExcel(activeCompanyData.companyName, activeCompanyData.invoices, activeCompanyData)}
+                                className="px-3.5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold rounded-xl transition flex items-center space-x-1.5 text-xs whitespace-nowrap"
+                                title="Export Excel"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span>Excel</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Company Quick Metric Strip */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-white/15">
+                            <div>
+                              <p className="text-xs text-blue-200">Total Invoices</p>
+                              <p className="text-lg font-bold text-white mt-0.5">{activeCompanyData.totalInvoices}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-blue-200">Total Sales Value</p>
+                              <p className="text-lg font-bold text-white mt-0.5">{formatINR(activeCompanyData.totalSales)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-blue-200">Total Commission</p>
+                              <p className="text-lg font-bold text-amber-300 mt-0.5">{formatINR(activeCompanyData.totalCommission)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-blue-200">Pending Balance</p>
+                              <p className="text-lg font-bold text-rose-300 mt-0.5">{formatINR(activeCompanyData.pendingBalance)}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Sub-Tabs: Invoices vs Payment History */}
+                        <div className="flex border-b border-gray-200 bg-gray-50/50 px-6 pt-3">
+                          <button
+                            onClick={() => setCompanyPaymentSubTab("invoices")}
+                            className={`pb-3 px-4 font-semibold text-sm transition relative ${companyPaymentSubTab === "invoices"
+                              ? "text-blue-600 border-b-2 border-blue-600 font-bold"
+                              : "text-gray-600 hover:text-gray-900"
+                              }`}
+                          >
+                            Invoices & Commission ({activeCompanyData.invoices.length})
+                          </button>
+                          <button
+                            onClick={() => setCompanyPaymentSubTab("history")}
+                            className={`pb-3 px-4 font-semibold text-sm transition relative ${companyPaymentSubTab === "history"
+                              ? "text-blue-600 border-b-2 border-blue-600 font-bold"
+                              : "text-gray-600 hover:text-gray-900"
+                              }`}
+                          >
+                            Payment History Log ({activeCompanyData.paymentHistory.length})
+                          </button>
+                        </div>
+
+                        {/* Tab 1: Invoices Breakdown Table */}
+                        {companyPaymentSubTab === "invoices" && (
+                          <div className="p-4 sm:p-6 overflow-x-auto">
+                            {activeCompanyData.invoices.length === 0 ? (
+                              <div className="text-center py-12 text-gray-500">
+                                <p className="text-base font-medium">No invoices found for this company in selected period.</p>
+                              </div>
+                            ) : (
+                              <table className="w-full text-left text-sm text-gray-700">
+                                <thead className="text-xs uppercase bg-gray-100 text-gray-700 font-bold">
+                                  <tr>
+                                    <th className="py-3 px-3 rounded-l-lg">Invoice #</th>
+                                    <th className="py-3 px-3">Date</th>
+                                    <th className="py-3 px-3">Sales Person</th>
+                                    <th className="py-3 px-3">Item</th>
+                                    <th className="py-3 px-3">Sale Amount</th>
+                                    <th className="py-3 px-3">Commission</th>
+                                    <th className="py-3 px-3">Paid</th>
+                                    <th className="py-3 px-3">Balance</th>
+                                    <th className="py-3 px-3">Status</th>
+                                    <th className="py-3 px-3 text-right rounded-r-lg">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 font-medium">
+                                  {activeCompanyData.invoices.map((inv) => {
+                                    const amount = getInvoiceAmount(inv);
+                                    const comm = inv.commission || 0;
+                                    const paid = inv.commissionPaidAmount || 0;
+                                    const bal = Math.max(0, comm - paid);
+                                    const isInvoicePaid = bal <= 0 && comm > 0;
+                                    const isInvoicePartial = paid > 0 && bal > 0;
+
+                                    return (
+                                      <tr key={getInvoiceId(inv)} className="hover:bg-gray-50/80 transition">
+                                        <td className="py-3.5 px-3 font-bold text-gray-900">{inv.invoiceNumber}</td>
+                                        <td className="py-3.5 px-3 text-gray-600 text-xs">
+                                          {inv.date ? new Date(inv.date).toLocaleDateString("en-IN") : "-"}
+                                        </td>
+                                        <td className="py-3.5 px-3 text-gray-800">{inv.salesPerson || "-"}</td>
+                                        <td className="py-3.5 px-3 text-gray-600 text-xs truncate max-w-[120px]">{inv.saleItem || "-"}</td>
+                                        <td className="py-3.5 px-3 font-semibold text-gray-900">{formatINR(amount)}</td>
+                                        <td className="py-3.5 px-3 font-semibold text-purple-700">{formatINR(comm)}</td>
+                                        <td className="py-3.5 px-3 font-semibold text-green-600">{formatINR(paid)}</td>
+                                        <td className="py-3.5 px-3 font-bold text-red-600">{formatINR(bal)}</td>
+                                        <td className="py-3.5 px-3">
+                                          {isInvoicePaid ? (
+                                            <span className="px-2.5 py-1 bg-green-100 text-green-800 text-xs font-bold rounded-full">
+                                              Paid
+                                            </span>
+                                          ) : isInvoicePartial ? (
+                                            <span className="px-2.5 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full">
+                                              Partial
+                                            </span>
+                                          ) : comm > 0 ? (
+                                            <span className="px-2.5 py-1 bg-red-100 text-red-800 text-xs font-bold rounded-full">
+                                              Unpaid
+                                            </span>
+                                          ) : (
+                                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full">
+                                              No Comm
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-3.5 px-3 text-right">
+                                          <div className="flex items-center justify-end space-x-1.5">
+                                            {bal > 0 && (
+                                              <button
+                                                onClick={() => openPayCommissionModal(inv, "commission")}
+                                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-xs"
+                                              >
+                                                Pay
+                                              </button>
+                                            )}
+                                            {paid > 0 && (
+                                              <button
+                                                onClick={() => handleUndoCommission(getInvoiceId(inv), "commission")}
+                                                className="px-2.5 py-1.5 bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-600 text-xs font-medium rounded-lg transition border border-gray-200"
+                                                title="Reset payment to unpaid"
+                                              >
+                                                Undo
+                                              </button>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Tab 2: Payment History Audit Log */}
+                        {companyPaymentSubTab === "history" && (
+                          <div className="p-4 sm:p-6 overflow-x-auto">
+                            {activeCompanyData.paymentHistory.length === 0 ? (
+                              <div className="text-center py-12 text-gray-500">
+                                <svg className="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <p className="text-base font-medium">No past payment transactions recorded for this company.</p>
+                                <p className="text-xs text-gray-400 mt-1">Payments made through invoices or company balance will appear here.</p>
+                              </div>
+                            ) : (
+                              <table className="w-full text-left text-sm text-gray-700">
+                                <thead className="text-xs uppercase bg-gray-100 text-gray-700 font-bold">
+                                  <tr>
+                                    <th className="py-3 px-4 rounded-l-lg">Payment Date</th>
+                                    <th className="py-3 px-4">Invoice #</th>
+                                    <th className="py-3 px-4">Sales Person</th>
+                                    <th className="py-3 px-4">Amount Paid</th>
+                                    <th className="py-3 px-4">Remarks / Ref</th>
+                                    <th className="py-3 px-4 text-right rounded-r-lg">Receipt</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 font-medium">
+                                  {activeCompanyData.paymentHistory.map((item, idx) => (
+                                    <tr key={`${item.invoiceId}-${idx}`} className="hover:bg-gray-50/80 transition">
+                                      <td className="py-3.5 px-4 font-semibold text-gray-900">
+                                        {item.date ? new Date(item.date).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "-"}
+                                      </td>
+                                      <td className="py-3.5 px-4 font-bold text-blue-600">{item.invoiceNumber}</td>
+                                      <td className="py-3.5 px-4 text-gray-700">{item.salesPerson || "-"}</td>
+                                      <td className="py-3.5 px-4 font-bold text-green-600 text-base">{formatINR(item.amount)}</td>
+                                      <td className="py-3.5 px-4 text-gray-600 text-xs">{item.remarks || "Payment Recorded"}</td>
+                                      <td className="py-3.5 px-4 text-right">
+                                        <button
+                                          onClick={() => {
+                                            setReceiptData({
+                                              companyName: activeCompanyData.companyName,
+                                              invoiceNumber: item.invoiceNumber,
+                                              amount: item.amount,
+                                              date: item.date,
+                                              remarks: item.remarks,
+                                              salesPerson: item.salesPerson,
+                                            });
+                                            setShowPaymentReceiptModal(true);
+                                          }}
+                                          className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition border border-blue-200"
+                                        >
+                                          📄 Receipt
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-2xl p-12 text-center border border-gray-200 text-gray-500">
+                        <p className="text-lg font-medium">Select a company from the left panel to manage payments</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {/* Customers Tab Content */}
           {activeTab === "clients" && (() => {
@@ -5501,7 +6373,7 @@ export default function Dashboard() {
                 )}
                 <div className="flex justify-between items-center border-t border-orange-200 pt-2 mt-2">
                   <span className="text-sm font-bold text-gray-700">Remaining Balance</span>
-                  <span className="text-lg font-bold text-orange-600">{formatINR(payCommissionData.totalAmount - payCommissionData.alreadyPaid)}</span>
+                  <span className="text-lg font-bold text-orange-600">{formatINR(round2(payCommissionData.totalAmount - payCommissionData.alreadyPaid))}</span>
                 </div>
               </div>
 
@@ -5514,28 +6386,29 @@ export default function Dashboard() {
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-semibold text-sm">₹</span>
                   <input
                     type="number"
-                    min={1}
-                    max={payCommissionData.totalAmount - payCommissionData.alreadyPaid}
-                    step={0.01}
-                    value={payCommissionData.payAmount || ""}
-                    onChange={(e) =>
-                      setPayCommissionData({ ...payCommissionData, payAmount: parseFloat(e.target.value) || 0 })
-                    }
+                    min={0.01}
+                    max={round2(payCommissionData.totalAmount - payCommissionData.alreadyPaid)}
+                    step="0.01"
+                    value={payCommissionData.payAmount !== undefined && payCommissionData.payAmount !== null ? payCommissionData.payAmount : ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPayCommissionData({ ...payCommissionData, payAmount: val === "" ? 0 : parseFloat(val) || 0 });
+                    }}
                     className="w-full pl-8 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent text-gray-900 font-semibold"
                   />
                 </div>
                 <div className="flex gap-3 mt-2">
                   <button
                     type="button"
-                    onClick={() => setPayCommissionData({ ...payCommissionData, payAmount: payCommissionData.totalAmount - payCommissionData.alreadyPaid })}
+                    onClick={() => setPayCommissionData({ ...payCommissionData, payAmount: round2(payCommissionData.totalAmount - payCommissionData.alreadyPaid) })}
                     className="text-xs text-orange-600 hover:text-orange-700 font-semibold underline"
                   >
                     Pay Full Remaining
                   </button>
-                  {payCommissionData.totalAmount - payCommissionData.alreadyPaid > 1 && (
+                  {round2(payCommissionData.totalAmount - payCommissionData.alreadyPaid) > 1 && (
                     <button
                       type="button"
-                      onClick={() => setPayCommissionData({ ...payCommissionData, payAmount: Math.floor((payCommissionData.totalAmount - payCommissionData.alreadyPaid) / 2) })}
+                      onClick={() => setPayCommissionData({ ...payCommissionData, payAmount: round2((payCommissionData.totalAmount - payCommissionData.alreadyPaid) / 2) })}
                       className="text-xs text-gray-500 hover:text-gray-700 font-semibold underline"
                     >
                       Pay Half
@@ -6837,6 +7710,217 @@ export default function Dashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Company Lump-Sum / Full Settlement Modal */}
+      {showCompanyBulkPayModal && companyBulkPayData && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="bg-linear-to-r from-blue-900 to-indigo-900 px-6 py-5 text-white flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold">Process Company Payment</h3>
+                <p className="text-xs text-blue-200 mt-0.5">{companyBulkPayData.companyName}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowCompanyBulkPayModal(false);
+                  setCompanyBulkPayData(null);
+                }}
+                className="text-white/80 hover:text-white hover:bg-white/10 rounded-full p-1.5 transition"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-5">
+              <div className="p-4 bg-blue-50/70 border border-blue-200/60 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Outstanding Balance</p>
+                  <p className="text-2xl font-black text-rose-600 mt-0.5">
+                    {formatINR(companyBulkPayData.totalPending)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCompanyBulkPayData({ ...companyBulkPayData, payAmount: round2(companyBulkPayData.totalPending) })}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-xs"
+                >
+                  Pay Full Balance
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1.5">
+                  Amount to Pay (₹) <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-3 text-gray-500 font-bold">₹</span>
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={round2(companyBulkPayData.totalPending)}
+                    step="0.01"
+                    value={companyBulkPayData.payAmount !== undefined && companyBulkPayData.payAmount !== null ? companyBulkPayData.payAmount : ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCompanyBulkPayData({ ...companyBulkPayData, payAmount: val === "" ? 0 : parseFloat(val) || 0 });
+                    }}
+                    placeholder="Enter payment amount"
+                    className="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-bold text-lg"
+                  />
+                </div>
+                <p className="text-xs text-blue-600 font-medium mt-1">✓ Payment will be applied starting from the oldest unpaid month onwards (FIFO).</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                  Payment Method
+                </label>
+                <select
+                  value={companyBulkPayData.paymentMethod}
+                  onChange={(e) => setCompanyBulkPayData({ ...companyBulkPayData, paymentMethod: e.target.value as any })}
+                  className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+                >
+                  {["Bank Transfer", "UPI", "Cash", "Cheque", "Credit Card"].map((method) => (
+                    <option key={method} value={method}>{method}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                  Remarks / Transaction Reference
+                </label>
+                <input
+                  type="text"
+                  value={companyBulkPayData.remarks}
+                  onChange={(e) => setCompanyBulkPayData({ ...companyBulkPayData, remarks: e.target.value })}
+                  placeholder="e.g. UTR / Cheque # / NEFT Ref"
+                  className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                />
+              </div>
+
+              <div className="flex space-x-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCompanyBulkPayModal(false);
+                    setCompanyBulkPayData(null);
+                  }}
+                  className="flex-1 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-100 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting || !companyBulkPayData.payAmount || companyBulkPayData.payAmount <= 0}
+                  onClick={handlePayCompanyLumpSum}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl transition shadow-md flex items-center justify-center space-x-2"
+                >
+                  {isSubmitting ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <span>Confirm & Pay {formatINR(companyBulkPayData.payAmount || 0)}</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Receipt Modal */}
+      {showPaymentReceiptModal && receiptData && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Receipt Header Banner */}
+            <div className="bg-linear-to-r from-blue-900 via-blue-800 to-indigo-900 px-6 py-6 text-white text-center relative">
+              <button
+                onClick={() => {
+                  setShowPaymentReceiptModal(false);
+                  setReceiptData(null);
+                }}
+                className="absolute right-4 top-4 text-white/80 hover:text-white hover:bg-white/10 rounded-full p-1.5 transition"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-white/20">
+                <svg className="w-6 h-6 text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-black tracking-tight">Payment Receipt</h3>
+              <p className="text-xs text-blue-200 mt-0.5">InvoiceTrack Payment System</p>
+            </div>
+
+            {/* Receipt Content */}
+            <div className="p-6 space-y-4 text-gray-800">
+              <div className="text-center pb-4 border-b border-gray-100">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">Amount Paid</p>
+                <p className="text-3xl font-black text-green-600 mt-1">₹{receiptData.amount.toLocaleString("en-IN")}</p>
+                <span className="inline-block mt-2 px-3 py-1 bg-green-100 text-green-800 text-xs font-bold rounded-full">
+                  ✓ Payment Successful
+                </span>
+              </div>
+
+              <div className="space-y-2.5 text-sm">
+                <div className="flex justify-between py-1 border-b border-gray-100">
+                  <span className="text-gray-500">Company / Client</span>
+                  <span className="font-bold text-gray-900 text-right">{receiptData.companyName}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-gray-100">
+                  <span className="text-gray-500">Invoice Number</span>
+                  <span className="font-bold text-blue-600">{receiptData.invoiceNumber}</span>
+                </div>
+                {receiptData.salesPerson && (
+                  <div className="flex justify-between py-1 border-b border-gray-100">
+                    <span className="text-gray-500">Sales Person</span>
+                    <span className="font-medium text-gray-800">{receiptData.salesPerson}</span>
+                  </div>
+                )}
+                <div className="flex justify-between py-1 border-b border-gray-100">
+                  <span className="text-gray-500">Payment Date</span>
+                  <span className="font-medium text-gray-800">
+                    {receiptData.date ? new Date(receiptData.date).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "-"}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1">
+                  <span className="text-gray-500">Remarks / Note</span>
+                  <span className="font-medium text-gray-800 text-right max-w-[200px] truncate">{receiptData.remarks || "Commission Paid"}</span>
+                </div>
+              </div>
+
+              <div className="flex space-x-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition shadow-sm flex items-center justify-center space-x-2 text-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                  <span>Print Receipt</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPaymentReceiptModal(false);
+                    setReceiptData(null);
+                  }}
+                  className="px-5 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-100 transition text-sm"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
