@@ -2148,52 +2148,52 @@ export default function Dashboard() {
           {activeTab === "dashboard" && (
             <>
               {/* Stats Cards - Row 1 */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                 {/* Total Cost */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Total Cost</p>
-                    <p className="text-3xl font-bold text-gray-900 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Total Cost">Total Cost</p>
+                    <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-1.5 tracking-tight break-words">
                       {formatINR(filteredInvoicesByMonth.reduce((sum, inv) => sum + inv.cost, 0))}
                     </p>
                   </div>
                 </div>
 
                 {/* Total Sale Amount */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Sale Amount</p>
-                    <p className="text-3xl font-bold text-blue-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Sale Amount">Sale Amount</p>
+                    <p className="text-xl sm:text-2xl font-bold text-blue-600 mt-1.5 tracking-tight break-words">
                       {formatINR(totalRevenue)}
                     </p>
                   </div>
                 </div>
 
                 {/* Total Expenses */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Expenses</p>
-                    <p className="text-3xl font-bold text-red-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Expenses">Expenses</p>
+                    <p className="text-xl sm:text-2xl font-bold text-red-600 mt-1.5 tracking-tight break-words">
                       {formatINR(filteredInvoicesByMonth.reduce((sum, inv) => sum + inv.expenses, 0))}
                     </p>
                   </div>
                 </div>
 
                 {/* Total Commission */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Commission</p>
-                    <p className="text-3xl font-bold text-orange-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Commission">Commission</p>
+                    <p className="text-xl sm:text-2xl font-bold text-orange-600 mt-1.5 tracking-tight break-words">
                       {formatINR(filteredInvoicesByMonth.reduce((sum, inv) => sum + inv.commission, 0))}
                     </p>
                   </div>
                 </div>
 
                 {/* Total Sales Commission */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Sales Commission</p>
-                    <p className="text-3xl font-bold text-purple-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Sales Commission">Sales Commission</p>
+                    <p className="text-xl sm:text-2xl font-bold text-purple-600 mt-1.5 tracking-tight break-words">
                       {formatINR(filteredInvoicesByMonth.reduce((sum, inv) => sum + inv.salesCommission, 0))}
                     </p>
                   </div>
@@ -2201,40 +2201,40 @@ export default function Dashboard() {
               </div>
 
               {/* Stats Cards - Row 2 */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                 {/* All Invoices */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">All Invoices</p>
-                    <p className="text-3xl font-bold text-gray-900 mt-2">{filteredInvoicesByMonth.length}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="All Invoices">All Invoices</p>
+                    <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-1.5 tracking-tight">{filteredInvoicesByMonth.length}</p>
                   </div>
                 </div>
 
                 {/* Profit Without Expense */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Profit Without Expense</p>
-                    <p className="text-3xl font-bold text-blue-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Profit Without Expense">Profit Without Expense</p>
+                    <p className="text-xl sm:text-2xl font-bold text-blue-600 mt-1.5 tracking-tight break-words">
                       {formatINR(filteredInvoicesByMonth.reduce((sum, inv) => sum + (getInvoiceAmount(inv) - inv.cost), 0))}
                     </p>
                   </div>
                 </div>
 
                 {/* Profit */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Profit</p>
-                    <p className="text-3xl font-bold text-emerald-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Profit">Profit</p>
+                    <p className="text-xl sm:text-2xl font-bold text-emerald-600 mt-1.5 tracking-tight break-words">
                       {formatINR(filteredInvoicesByMonth.reduce((sum, inv) => sum + (getInvoiceAmount(inv) - inv.cost - inv.expenses), 0))}
                     </p>
                   </div>
                 </div>
 
                 {/* Net Profit */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Net Profit</p>
-                    <p className="text-3xl font-bold text-green-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Net Profit">Net Profit</p>
+                    <p className="text-xl sm:text-2xl font-bold text-green-600 mt-1.5 tracking-tight break-words">
                       {formatINR(filteredInvoicesByMonth.reduce((sum, inv) => {
                         const amount = getInvoiceAmount(inv);
                         const profit = amount - inv.cost - inv.expenses;
@@ -2245,10 +2245,10 @@ export default function Dashboard() {
                 </div>
 
                 {/* Profit Margin */}
-                <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition">
+                <div className="bg-white rounded-xl shadow-sm p-4 sm:p-5 border border-gray-100 hover:shadow-md transition">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Profit Margin</p>
-                    <p className="text-3xl font-bold text-teal-600 mt-2">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600 truncate" title="Profit Margin">Profit Margin</p>
+                    <p className="text-xl sm:text-2xl font-bold text-teal-600 mt-1.5 tracking-tight">
                       {totalRevenue > 0 ? ((filteredInvoicesByMonth.reduce((sum, inv) => {
                         const amount = getInvoiceAmount(inv);
                         const profit = amount - inv.cost - inv.expenses;
